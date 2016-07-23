@@ -197,8 +197,16 @@ public class ExcelTableInjector {
         for(int j=rowEnd;j>rowStart;j--) {
             XSSFRow row = worksheet.getRow(j);
             XSSFRow newRow = worksheet.getRow(j+numRowsDown);
-            if(newRow == null) worksheet.createRow(j+numRowsDown);
-            newRow = worksheet.getRow(j+numRowsDown);
+            if(row == null && newRow == null) 
+                continue;
+            else if (row == null) {
+                worksheet.removeRow(newRow);
+                continue;
+            }
+            if(newRow == null) {
+                newRow = worksheet.createRow(j+numRowsDown);
+            }
+//            newRow = worksheet.getRow(j+numRowsDown);
             //if(row ==null) continue;
             for(int k=colStart;k<=colEnd;k++) {
                 XSSFCell cell = row.getCell(k);
@@ -275,6 +283,8 @@ public class ExcelTableInjector {
                         // move the defined range of cells down
                         this.shiftRange(newLastRow-tableLastRow-1-totalsRowCount, tableLastRow, sheetLastRow, colStart, colEnd);
                     }
+                } else if(sheetLastRow < newLastRow) {
+                    
                 }
                 // Reset the Table Range Reference
                 cttable.setRef(newRef);
@@ -304,8 +314,13 @@ public class ExcelTableInjector {
                 String xColName = def.xName;
                 String fmData = dataRow.get(i);
                 int xColInt = def.index;
-                XSSFCell cell = xrow.getCell(xColInt);
-                if(cell == null) continue;
+                XSSFCell cell = null;
+                try {
+                    cell = xrow.getCell(xColInt);
+                } catch (Exception noCell) {
+                    throw new Exception ("No cell found at " + xColInt + " on row: " + xrow + " for column named: " + xColName);
+                }
+                if(cell == null) cell = xrow.createCell(xColInt);
                 cell.setCellStyle(def.style);
                 int cellType = def.type;
                 if (cellType == XSSFCell.CELL_TYPE_BLANK) {
@@ -373,6 +388,10 @@ public class ExcelTableInjector {
                 int thisRow = startRow + l;
                 HashMap row = rowHash.get(l);
                 XSSFRow xrow = xsheet.getRow(thisRow);
+                if(xrow == null) {
+                    xrow = xsheet.createRow(thisRow);
+//                    xrow = xsheet.getRow(thisRow);
+                }
                 this.populateRow(xrow, rowHash.get(l), colNamesHash, xColsMap);
             }
         } catch (Exception e) {
