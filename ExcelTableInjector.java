@@ -33,7 +33,7 @@ import org.w3c.dom.*;
  */
 public class ExcelTableInjector {
     
-    static final String multipleUsage = "Usage: -s sourcePath.xlsx -d destPath.xlsx -n sheetNumber [-p dataFilePath] -b table:table1=dataPath1|table:tableN=dataPathN|cell:cellPosition1=value1|cell:cellPositionN=valueN ... any combo of table and cell entries separted by |";
+    static final String multipleUsage = "Usage: -c injectMultiple -s sourcePath.xlsx -d destPath.xlsx -n sheetNumber [-p dataFilePath] -b table:table1=dataPath1~table:tableN=dataPathN~cell:cellPosition1=value1~cell:cellPositionN=valueN ... any combo of table and cell entries separted by ~";
     static final String cellUsage = "Usage: -s sourcePath.xlsx -d destPath.xlsx -n sheetNumber -a cellPosition -v value";
     static final String injectUsage = "Usage: -s sourcePath.xlsx -d destPath.xlsx -n sheetNumber -t tableName -m dataPath.mer";
     static final boolean mac = System.getProperty("os.name").startsWith("Mac");
@@ -142,15 +142,22 @@ public class ExcelTableInjector {
             // convert it into a POI object
             workbook = new XSSFWorkbook(input_document);
             // Read excel sheet that needs to be updated
-            this.sheetNum = sheetNum;
-            worksheet = workbook.getSheetAt(this.sheetNum);
         } catch (Exception e) {
             throw new Exception("Unable to load Excel file", e);
         }
      }
     
-    private void loadTable(String tableName, int sheetNum) throws Exception {
+    private void loadTable(String tableName) throws Exception {
         try {
+            String sheetNumTxt = tableName.indexOf("[")>-1 ? tableName.substring(tableName.indexOf("[")) : null;
+            if(sheetNumTxt != null) {
+                this.sheetNum = new Integer(sheetNumTxt.substring(1,sheetNumTxt.length()-1));
+                tableName = tableName.substring(0, tableName.indexOf("["));
+            } else {
+                this.sheetNum = 0;
+            }
+            worksheet = workbook.getSheetAt(this.sheetNum);
+            
             // Get tables and iterate to specified
             list = (List<XSSFTable>)worksheet.getTables();
             Iterator<XSSFTable> itor = list.iterator();
@@ -166,7 +173,7 @@ public class ExcelTableInjector {
             }
             if(xtable == null || cttable == null) throw new Exception ("table not found.");
         } catch (Exception e) {
-            throw new Exception("Unable to load specified table " + tableName + " on sheet " + sheetNum, e);
+            throw new Exception("Unable to load specified table " + tableName, e);
         }
     }
     
@@ -243,7 +250,7 @@ public class ExcelTableInjector {
         return 0;
     }
     
-    private void makeRoomForData(int sheetNum) throws Exception {
+    private void makeRoomForData() throws Exception {
         try {
             // parse the current AreaReference
             String ref = cttable.getRef();
@@ -369,7 +376,13 @@ public class ExcelTableInjector {
                 String colName = col.getName();
                 XSSFCell cell1 = firstRow.getCell(m+startCell.getCol());
                 XSSFCell cell2 = secondRow.getCell(m+startCell.getCol());
-                String fmName = cell2.getStringCellValue();
+                String fmName = null;
+                try {
+                    fmName = cell2.getStringCellValue();
+                } catch (Exception e2) {
+                    //throw new Exception ("Cell:" + m+startCell.getCol());
+                    fmName = cell2.getRawValue();
+                }
 //                String fmName = cell2.getRawValue();
                 
                 int cellType = cell1.getCellType();
@@ -405,9 +418,9 @@ public class ExcelTableInjector {
         // load Excel file,
         this.loadExcel(xslSourcePath, sheetNum);
         //  get worksheet and table 
-        this.loadTable(tableName, sheetNum);
+        this.loadTable(tableName);
         // move existing contents below table down and reset table range reference
-        this.makeRoomForData(sheetNum);
+        this.makeRoomForData();
         // push CSV data into table
         this.injectData();
         // close source and save destination
@@ -418,14 +431,24 @@ public class ExcelTableInjector {
         // load CSV data
         this.loadData(dataPath);
         //  get worksheet and table 
-        this.loadTable(tableName, this.sheetNum);
+        this.loadTable(tableName);
         // move existing contents below table down and reset table range reference
-        this.makeRoomForData(this.sheetNum);
+        this.makeRoomForData();
         // push CSV data into table
         this.injectData();
     }
     
     public void updateCellValue(String cellPosition, String value) throws Exception {
+        
+        String sheetNumTxt = cellPosition.indexOf("[")>-1 ? cellPosition.substring(cellPosition.indexOf("[")) : null;
+            if(sheetNumTxt != null) {
+                this.sheetNum = new Integer(sheetNumTxt.substring(0,sheetNumTxt.length()-1));
+                cellPosition = cellPosition.substring(cellPosition.indexOf("["));
+            } else {
+                this.sheetNum = 0;
+            }
+            worksheet = workbook.getSheetAt(this.sheetNum);
+        
         CellReference c = new CellReference(cellPosition);
         XSSFCell cell = worksheet.getRow(c.getRow()).getCell(c.getCol());
         if(cell == null) throw new Exception("Invalid cell reference:" + cellPosition);
@@ -487,6 +510,90 @@ public class ExcelTableInjector {
         File file = new File(filePath);
         return file;
     }
+    
+    private static void getStackTrace(Throwable thrown, StringBuilder buf) throws Exception {
+        String lineReturn =  mac ? "\r" : "\n";
+        StackTraceElement stack[] = thrown.getStackTrace();
+        for (int index = 0; index < stack.length; index++) {
+            String cname = stack[index].getClassName();
+            if (cname != null) {
+                buf.append("\t");
+                buf.append(cname);
+                buf.append(" - ");
+            }
+            String fname = stack[index].getMethodName();
+            if (fname != null) {
+                buf.append(fname);
+                buf.append(" - ");
+            }
+            int line = stack[index].getLineNumber();
+            if (line >= 0) {
+                buf.append(line);
+                buf.append(lineReturn);
+            }
+        }
+    }
+    
+   private static String getStackTrace(Throwable thrown) {
+        try {
+            String lineReturn =  mac ? "\r" : "\n";
+            StringBuilder buf = new StringBuilder();
+            while (thrown != null) {
+                String message = thrown.getMessage();
+                if (message != null) {
+                    buf.append(message);
+                    buf.append(lineReturn);
+                } else {
+                    buf.append("[no message]");
+                    buf.append(lineReturn);
+                }
+                getStackTrace(thrown, buf);
+                thrown = thrown.getCause();
+            }
+            return buf.toString();
+        } catch (Exception e2) {
+            return "";
+        }
+    }
+   
+   private static void printStackTrace(Throwable thrown) {
+       try {
+           String content = getStackTrace(thrown);
+           File root = ExcelTableInjector.getLocationFile();
+           File log = new File(root, "ExcelInjector.log");
+           String output = log.getAbsolutePath();
+           if (output == null || content == null) {
+                throw new Exception("Invalid file reference or content provided");
+            }
+            String encoding = "UTF-8";
+            FileOutputStream outputStream = null;
+            try {
+                //File outputDir = output.getParentFile();
+                //outputDir.mkdirs();
+                outputStream = new FileOutputStream(output);
+                OutputStreamWriter writer = null;
+                PrintWriter printer = null;
+                try {
+                    writer = new OutputStreamWriter(outputStream, encoding);
+                    printer = new PrintWriter(writer);
+                    printer.print(content);
+                } finally {
+                    if (printer != null) {
+                        printer.close();
+                    }
+                    if (writer != null) {
+                        writer.close();
+                    }
+                }
+            } finally {
+                if (outputStream != null) {
+                    outputStream.close();
+                }
+            }
+       } catch (Exception e) {
+           e.printStackTrace();
+       }
+   }
     
     public static void main(String[] args) {
         try {
@@ -573,7 +680,6 @@ public class ExcelTableInjector {
                     else if(!mac && dataPath.indexOf("\\")<0) dataFile = new File(root, dataPath);
                 }
             }
-            
             ExcelTableInjector in = new ExcelTableInjector();
             if(command != null && command.compareToIgnoreCase("updateCell")==0) {
                 in.updateCellValue(sourceFile.getAbsolutePath(), destFile.getAbsolutePath(), sheet, areaRef, value);
@@ -585,8 +691,7 @@ public class ExcelTableInjector {
             System.out.println("OK.");
 
         } catch (Exception error) {
-            System.err.println("Unable to perform requested injection: " + (error.getMessage() == null ? "null pointer." : error.getMessage()));
-            error.printStackTrace();
+            ExcelTableInjector.printStackTrace(error);
             System.exit(-1);
         }
     }
